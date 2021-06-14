@@ -1,64 +1,38 @@
 using System;
 using System.IO;
 using System.Net;
-using UnityEditor.PackageManager;
 using UnityEngine;
 
 namespace DoubTech.JoesChessApi
 {
-    public class JoesChessApiRequest
+    public class JoesChessApiRequest<T> where T : class
     {
         private HttpWebRequest request;
-        private string endpoint;
+        internal string endpoint;
         public HttpStatusCode statusCode;
+        public T result;
 
-        private JoesChessApiRequest()
+        private class Actions
+        {
+            public Action<T> onResult;
+            public Action onError;
+        }
+
+        internal JoesChessApiRequest()
         {
 
         }
 
-        public static JoesChessApiRequest RequestNextBest(string moves, Action<NextBest> result)
+        internal void ChessApiRequest(string moves, Action<T> result, Action onError = null)
         {
-            var request = new JoesChessApiRequest()
-            {
-                endpoint = NextBest.END_POINT
-            };
-
-            request.ChessApiRequest(moves, result);
-
-            return request;
-        }
-
-        public static JoesChessApiRequest RequestStatus(string moves, Action<Status> result)
-        {
-            var request = new JoesChessApiRequest()
-            {
-                endpoint = Status.END_POINT
-            };
-
-            request.ChessApiRequest(moves, result);
-
-            return request;
-        }
-
-        public static JoesChessApiRequest RequestValidMove(string moves, Action<ValidMove> result)
-        {
-            var request = new JoesChessApiRequest()
-            {
-                endpoint = ValidMove.END_POINT
-            };
-
-            request.ChessApiRequest(moves, result);
-
-            return request;
-        }
-
-        private void ChessApiRequest<T>(string moves, Action<T> result)
-        {
-            var request =
+            request =
                 (HttpWebRequest) WebRequest.Create(
                     $"http://chess-api.herokuapp.com/{endpoint}/{moves}");
-            request.BeginGetResponse(HandleResponse, result);
+            request.BeginGetResponse(HandleResponse, new Actions()
+            {
+                onResult = result,
+                onError = onError
+            });
         }
 
         private void HandleResponse(IAsyncResult ar)
@@ -67,29 +41,15 @@ namespace DoubTech.JoesChessApi
             bool error = true;
             statusCode = response.StatusCode;
 
+            var actions = (Actions) ar.AsyncState;
+
             if (response.StatusCode == HttpStatusCode.OK)
             {
                 using (var streamReader = new StreamReader(response.GetResponseStream()))
                 {
                     var responseValue = streamReader.ReadToEnd();
-                    switch (endpoint)
-                    {
-                        case NextBest.END_POINT:
-                            var nextBest = JsonUtility.FromJson<NextBest>(responseValue);
-                            ((Action<NextBest>) ar.AsyncState).Invoke(nextBest);
-                            error = false;
-                            break;
-                        case ValidMove.END_POINT:
-                            var validMove = JsonUtility.FromJson<ValidMove>(responseValue);
-                            ((Action<ValidMove>) ar.AsyncState).Invoke(validMove);
-                            error = false;
-                            break;
-                        case Status.END_POINT:
-                            var status = JsonUtility.FromJson<Status>(responseValue);
-                            ((Action<Status>) ar.AsyncState).Invoke(status);
-                            error = false;
-                            break;
-                    }
+                    result = JsonUtility.FromJson<T>(responseValue);
+                    actions.onResult?.Invoke(result);
                 }
             }
 
@@ -97,7 +57,8 @@ namespace DoubTech.JoesChessApi
 
             if (error)
             {
-                ((Action<Status>) ar.AsyncState).Invoke(null);
+                Debug.Log("Error: " + response.StatusCode + ": " + response.StatusDescription);
+                actions.onError?.Invoke();
             }
         }
     }
@@ -108,13 +69,22 @@ namespace DoubTech.JoesChessApi
         public const string END_POINT = "next_best";
 
         public string bestNext;
+
+        public char CurrentFile => bestNext[0];
+        public int CurrentRank => int.Parse("" + bestNext[1]);
+
+        public char TargetFile => bestNext[2];
+        public int TargetRank => int.Parse("" + bestNext[3]);
+
+        public string TargetSquare => bestNext.Substring(2);
+        public string CurrentSquare => bestNext.Substring(0, 2);
     }
 
     [Serializable]
     public class ValidMove
     {
         public const string END_POINT = "valid_move";
-        public string validMove;
+        public bool validMove;
     }
 
     [Serializable]
@@ -154,5 +124,47 @@ namespace DoubTech.JoesChessApi
         FiftyRuleMove,
         ThreefoldRepitition,
         Unknown,
+    }
+
+    public class JoesChessApiRequestFactory
+    {
+        public static JoesChessApiRequest<NextBest> RequestNextBest(string moves,
+            Action<NextBest> result, Action onError = null)
+        {
+            var request = new JoesChessApiRequest<NextBest>()
+            {
+                endpoint = NextBest.END_POINT
+            };
+
+            request.ChessApiRequest(moves, result, onError);
+
+            return request;
+        }
+
+        public static JoesChessApiRequest<Status> RequestStatus(string moves, Action<Status> result,
+            Action onError = null)
+        {
+            var request = new JoesChessApiRequest<Status>()
+            {
+                endpoint = Status.END_POINT
+            };
+
+            request.ChessApiRequest(moves, result, onError);
+
+            return request;
+        }
+
+        public static JoesChessApiRequest<ValidMove> RequestValidMove(string moves,
+            Action<ValidMove> result, Action onError = null)
+        {
+            var request = new JoesChessApiRequest<ValidMove>()
+            {
+                endpoint = ValidMove.END_POINT
+            };
+
+            request.ChessApiRequest(moves, result, onError);
+
+            return request;
+        }
     }
 }
